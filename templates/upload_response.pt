@@ -1,0 +1,23 @@
+<html>
+	<head>
+		<title>Upload Test Result</title>
+	</head>
+	<body>
+		<div style='text-align: left; margin-left: 15px;'>
+			<h1>File upload result:</h1><br />
+			<div style='border: 2px solid #000000; width: 400px;'>
+				<p style='margin-left: 15px;'><strong>Files successfully uploaded:</strong>
+					<ul>
+					${structure: success}
+					</ul>
+				</p>
+				<p style='margin-left: 15px;'><strong>Files unsuccessfully uploaded:</strong>
+					<ul>
+					${structure: failed}
+					</ul>
+				</p>
+			</div>			
+			<h3><a href='/CHS/'>Upload another file</a></h3>
+		</div>
+	</body>
+</html>

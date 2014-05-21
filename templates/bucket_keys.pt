@@ -1,0 +1,17 @@
+<html>
+	<head>
+		<title>Display Bucket Keys</title>
+	</head>
+	<body>
+		<div style='text-align: left; margin-left: 15px;'>
+			<h1>Bucket Keys:</h1><br />
+			<div style='border: 2px solid #000000; width: 400px;'>
+				<p style='margin-left: 15px;'>
+					<ul>
+					${structure: success}
+					</ul>
+				</p>
+			</div>			
+		</div>
+	</body>
+</html>
