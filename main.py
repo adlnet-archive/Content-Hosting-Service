@@ -24,16 +24,15 @@ def main(args):
 	config.add_route('advancedSearch', pattern='/CHS/advanced_search', request_method='POST')
 	config.add_view(calls.advancedSearch, route_name='advancedSearch')
 	
-	# configure metadata routines
+	# configure access metadata routines
 	config.add_route('getMetadata', pattern='/CHS/get_metadata/{id}', request_method=('GET', 'HEAD'))
 	config.add_view(calls.getMetadata, route_name='getMetadata')
 	config.add_route('setMetadata', pattern='/CHS/set_metadata/{id}', request_method=('POST', 'PUT'))
 	config.add_view(calls.setMetadata, route_name='setMetadata')
 	
-	# configure file routines
+	# configure file handling routines
 	config.add_route('uploadFile', pattern='/CHS/upload_file')
 	config.add_view(calls.uploadFile, route_name='uploadFile', request_method='POST')
-	
 	config.add_route('downloadFile', pattern='/CHS/download_file/{id}', request_method=('GET', 'HEAD'))
 	config.add_view(calls.downloadFile, route_name='downloadFile')
 	config.add_route('deleteFile', pattern='/CHS/{id}', request_method='DELETE')

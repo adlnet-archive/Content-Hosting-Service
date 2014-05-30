@@ -9,10 +9,14 @@ from pyramid.renderers import render_to_response
 from array import *
 from time import strftime
 
+
+# setup the Riak db
 client = riak.RiakClient(pb_port=8087, protocol='pbc')
 db = client.bucket('resources')
+# initialize the file storage location
 f_s = '/home/user/Development/uploads'
 
+''' This is the data object structure format for  the file objects stored in the db '''
 dataProfile = {
 	'file_location': {
 		'local_path': None
@@ -30,10 +34,12 @@ dataProfile = {
 	}
 }
 
+# method for serving the file upload form
 def home(request):
 	variables = {'name': 'next_file'}
 	return render_to_response('public/upload_file.pt', variables, request=request)
 
+# method for displaying all of the keys in the db
 def getKeys(request):
 	success_HTML = ''
 	successlist = list()
@@ -47,7 +53,11 @@ def getKeys(request):
 	variables = {'success': success_HTML}
 	return render_to_response('public/bucket_keys.pt', variables, request=request)
 	
-	
+''' method for conducting a basic search. User submits a POST request consisting of a JSON document with a search term.
+	Returns:
+	200: OK: returns a list of filenames where there is a match between the search term and the metadata.
+	400: Bad Request: The request body is not valid JSON, or does not contain the required field.
+	404: Not Found: No results returned. '''
 def basicSearch(request):
 	search_term = ''
 	
@@ -63,12 +73,19 @@ def basicSearch(request):
 	res = Response(status=200, json=obj)
 	return res
 
-
+''' method for conducting an advanced search. User submits a POST request consisting of a JSON document with three 
+        required search terms.
+	Returns:
+	200: OK: returns a list of filenames where there is a match between the search term and the metadata.
+	400: Bad Request: The request body is not valid JSON, or does not contain the required field.
+	404: Not Found: No results returned. '''
 def advancedSearch(request):
+	# variables
 	author = ''
 	keywords = ''
 	resource_type = ''
 	
+	# check incoming request for validity as well as assigning values
 	try:
 		author = request.json['advanced_search']['author']
 		keywords = request.json['advanced_search']['keywords']
@@ -83,24 +100,36 @@ def advancedSearch(request):
 	return res
 
 
-
+''' this method takes a GET request with key {id} and returns the metadata object for that file.
+    Returns:
+    200: OK: the metadata was successfully returned.
+    404: Not Found: the file was not in the db. '''
 def getMetadata(request):
+    # get key: filename {id}
 	key_str = request.matchdict['id']
+	# get object
 	key = db.get(request.matchdict['id'])
 	db_data = key.data
 	
+	# validate key exists in the db:
 	if not key.exists:
 		obj = ['result', {'msg': 'resource id: ' + key_str + ' was not found'}]	
 		res = Response(status=404, json=obj)
 	else:
+	    # only return the metadata portion of the object
 		obj = {'metadata': db_data['metadata']}
 		res = Response(status=200, json=obj)
 		
 	return res
 	
 
-
+''' this method takes a POST request with key {id} and a JSON document with the metadata to set and 
+    returns the metadata object for that file.
+    Returns:
+    200: OK: the metadata was successfully returned.
+    404: Not Found: the file was not in the db. '''
 def setMetadata(request):
+    # variables:
 	author = ''
 	title = ''
 	description = ''
@@ -108,13 +137,16 @@ def setMetadata(request):
 	mime_type = ''
 	version = ''
 
+	# get key: filename {id}
 	key_str = request.matchdict['id']
 	key = db.get(request.matchdict['id'])
 	
+	# validate key exists in the db:
 	if not key.exists:
 		obj = ['result', {'msg': 'resource id: ' + key_str + ' was not found'}]	
 		res = Response(status=404, json=obj)
 	else:
+		# get the data from the request JSON object, validating in the process:
 		try:
 			author = request.json['metadata']['author']
 			title = request.json['metadata']['title']
@@ -127,6 +159,7 @@ def setMetadata(request):
 		except KeyError, ke:
 			return Response(status=400, body='Body does not include required field: ' + str(ke) )
 
+		# get the current time of the operation for updating the 'last_modified_date' field
 		now = strftime("%Y-%m-%d %H:%M:%S")
 		
 		# load up the data object
@@ -139,33 +172,41 @@ def setMetadata(request):
 		key.data['metadata']['version'] = version
 		key.store()
 		
+		# return the metadata that was just set
 		obj = {'metadata': key.data['metadata']}
 		res = Response(status=200, json=obj)
 		return res
 
 
-
+''' This method currently takes a POST request from a web form template to upload one or more files.
+    Each file is checked against the allowed file extensions for acceptance. Files are uploaded and 
+	stored on the server with a filepath saved to the 'file_location' part of the data object.
+	
+	Returns:
+	200: OK: File extension was accepted and the file was successfully uploaded.
+	400: Bad Request: File extension was not of the type accepted.
+	409: Conflict: File already exists in the db. '''
 def uploadFile(request):
+	# TODO: look for a way to submit files for upload via JSON POST request.
+	# TODO: decide how to handle failures when uploading multiple files.
 	success_HTML = ''
 	failed_HTML = ''
-	successlist = list()
-	failedlist = list()
+	successlist = list() # for reporting the filenames that were succefully uploaded
+	failedlist = list() # for reporting the filenames that were unsuccefully uploaded
 	fileslist = list()
-	fileslist = request.POST.getall('files')
+	fileslist = request.POST.getall('files') # files selected for upload
 	
+	#process each file in the upload list
 	for next_file in fileslist:
 		filename = next_file.filename
 		extension = os.path.splitext(filename)[1][1:].strip().lower()
 		input_file = next_file.file
-
-		#may need to come up with a procedure for handling a failed upload... 
-		#don't know if the upload should continue or error out?
-		
+		# check for the proper file extensions
 		if extension.lower() == 'zip' or extension.lower() == 'pdf' or extension.lower() == 'xml':
 			upload_path = os.path.join(f_s, filename % uuid.uuid4())
 			temp_path = upload_path + '~'
 			output_file = open(temp_path, 'wb')
-			
+			# upload process
 			input_file.seek(0)
 			while True:
 				data = input_file.read(2<<16)
@@ -207,34 +248,50 @@ def uploadFile(request):
 	variables = {'success': success_HTML, 'failed': failed_HTML}
 	return render_to_response('public/upload_response.pt', variables, request=request)
 
+''' This method currently takes a GET request to download one file {id}. Files are retrieved using the filepath 
+    from the data object.
 	
+	Returns:
+	200: OK: File was found and successfully downloaded.
+	404: Not found: File does not exist in the db. '''	
 def downloadFile(request):
+	# get key: filename {id}
 	filename = request.matchdict['id']
 	key = db.get(request.matchdict['id'])
-
+	# validate key exists in the db:
 	if not key.exists:
 		obj = ['result', {'msg': 'resource id: ' + filename + ' was not found'}]	
 		res = Response(status=404, json=obj)
 	else:
+		# get file location for download
 		file_path = key.data['file_location']['local_path']
+		# call download routines
 		res = Response(content_type=get_mimetype(file_path))
 		res.app_iter = FileIterable(file_path)
 		res.content_length = os.path.getsize(file_path)
 		res.status=200
 		return res		
 
-
+''' This method currently takes a DELETE request to delete one file {id} from the database.
+	
+	Returns:
+	200: OK: File extension was accepted and the file was succesfully uploaded.
+	404: Not found: File does not exist in the db. '''
 def deleteFile(request):
+	# get key: filename {id}
 	key_str = request.matchdict['id']
 	key = db.get(request.matchdict['id'])
 	db_data = key.data
-	
+	# validate key exists in the db:
 	if not key.exists:
 		obj = ['result', {'msg': 'resource id: ' + key_str + ' was not found'}]	
 		res = Response(status=404, json=obj)
 	else:
+		# get file location for delete
 		file_path = db_data['file_location']['local_path']
+		# delete from db
 		key.delete()
+		# delete from file system
 		os.remove(file_path)
 		obj = ['result', {'msg': 'deleteFile request for resource id: ' + key_str + ' was successful'}]	
 		res = Response(status=200, json=obj)
@@ -242,7 +299,12 @@ def deleteFile(request):
 	return res
 
 
-
+''' This method takes a GET request to return a list of versions associated with one file {id}.
+	(it is currently stubbed out for testing responses).
+	
+	Returns:
+	200: OK: Returns a JSON document with a list of the file's versions.
+	404: Not found: File does not exist in the db. '''
 def getAllVersions(request):
 
 	key = request.matchdict['id']
@@ -255,18 +317,19 @@ def getAllVersions(request):
 	
 	return res
 
-	
+''' this method returns the file's mime-type '''	
 def get_mimetype(filename):
 	type, encoding = mimetypes.guess_type(filename)
 	return type or 'application/octet-stream'
 	
-
+''' A wrapper class for the file iterator '''
 class FileIterable(object):
 	def __init__(self, filename):
 		self.filename = filename
 	def __iter__(self):
 		return FileIterator(self.filename)
-		
+
+''' A file iterator for iterating over a file and grabbing chunks of its data to pass along for download'''		
 class FileIterator(object):
 	chunk_size = 4096
 	def __init__(self, filename):
