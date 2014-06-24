@@ -24,11 +24,18 @@ def main(args):
 	config.add_route('advancedSearch', pattern='/CHS/advanced_search', request_method='POST')
 	config.add_view(calls.advancedSearch, route_name='advancedSearch')
 	
-	# configure access metadata routines
+	# configure access metadata and paradata routines
 	config.add_route('getMetadata', pattern='/CHS/get_metadata/{id}', request_method=('GET', 'HEAD'))
 	config.add_view(calls.getMetadata, route_name='getMetadata')
 	config.add_route('setMetadata', pattern='/CHS/set_metadata/{id}', request_method=('POST', 'PUT'))
 	config.add_view(calls.setMetadata, route_name='setMetadata')
+	config.add_route('getParadata', pattern='/CHS/get_paradata/{id}', request_method=('GET', 'HEAD'))
+	config.add_view(calls.getParadata, route_name='getParadata')
+	# set the two types of paradata: user reviews and user comments
+	config.add_route('setUserReviewParadata', pattern='/CHS/set_user_review_paradata/{id}', request_method=('POST', 'PUT'))
+	config.add_view(calls.setUserReviewParadata, route_name='setUserReviewParadata')
+	config.add_route('setUserCommentParadata', pattern='/CHS/set_user_comment_paradata/{fid}/{rid}', request_method=('POST', 'PUT'))
+	config.add_view(calls.setUserCommentParadata, route_name='setUserCommentParadata')
 	
 	# configure file handling routines
 	config.add_route('uploadFile', pattern='/CHS/upload_file')
@@ -37,6 +44,9 @@ def main(args):
 	config.add_view(calls.downloadFile, route_name='downloadFile')
 	config.add_route('deleteFile', pattern='/CHS/{id}', request_method='DELETE')
 	config.add_view(calls.deleteFile, route_name='deleteFile')
+	config.add_route('deleteAll', pattern='/CHS/deleteAll/', request_method='GET')
+	config.add_view(calls.deleteAll, route_name='deleteAll')
+
 	
 	# configure other routines
 	config.add_route('getAllVersions', pattern='/CHS/get_all_versions/{id}', request_method=('GET', 'HEAD'))

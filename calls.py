@@ -1,5 +1,5 @@
 import os
-import uuid, shutil
+import uuid, shutil, pprint
 import riak, copy, json, mimetypes
 import pyramid_storage
 
@@ -13,6 +13,7 @@ from time import strftime
 # setup the Riak db
 client = riak.RiakClient(pb_port=8087, protocol='pbc')
 db = client.bucket('resources')
+db.enable_search()
 # initialize the file storage location
 f_s = '/home/user/Development/uploads'
 
@@ -31,13 +32,34 @@ dataProfile = {
 		'resource_type': None,
 		'keywords': None,
 		'version': None
+	},
+	'paradata': {
+		'user_reviews': [
+			{'review_id': None,
+			 'user_rating': None,
+			 'user_name': None,
+			 'user_review_title': None,
+			 'user_review': None,
+			 'timestamp': None
+			 }
+		],
+		'user_comments': [
+			{'review_id': None,
+			 'comment_id': None,
+			 'helpful': None,
+			 'user_name': None,
+			 'user_comment': None,
+			 'timestamp': None
+			 }
+		]
 	}
+	
 }
 
 # method for serving the file upload form
 def home(request):
 	variables = {'name': 'next_file'}
-	return render_to_response('public/upload_file.pt', variables, request=request)
+	return render_to_response('templates/upload_file.pt', variables, request=request)
 
 # method for displaying all of the keys in the db
 def getKeys(request):
@@ -51,7 +73,7 @@ def getKeys(request):
 		success_HTML = success_HTML + NI
 		
 	variables = {'success': success_HTML}
-	return render_to_response('public/bucket_keys.pt', variables, request=request)
+	return render_to_response('templates/bucket_keys.pt', variables, request=request)
 	
 ''' method for conducting a basic search. User submits a POST request consisting of a JSON document with a search term.
 	Returns:
@@ -68,9 +90,25 @@ def basicSearch(request):
 	except KeyError:
 		return Response(status=400, body='Body does not include required field "search.term"')
 	
-	obj = ['result', {'msg': 'You made a basic search request for: ' + search_term}]
+	try:
+		term = 'metadata.keywords:*' + search_term.encode("utf-8") + '*'
+		search_results = client.search(db, term)
+	
+		try:
+			pprint.pprint(search_results['docs'])
+			'''
+			for result in search_results.run():
+				key = result.get()
+				data = key.get_data()
+				print incr
+				incr = incr + 1 '''
+		except Exception, e:
+			return Response(status=400, body='Problem with iterating search result: '  + str(e))
+	
+	except TypeError, te:
+		return Response(status=400, body='Problem with search request: '  + str(te))
 		
-	res = Response(status=200, json=obj)
+	res = Response(status=200, body='search request success')
 	return res
 
 ''' method for conducting an advanced search. User submits a POST request consisting of a JSON document with three 
@@ -108,17 +146,16 @@ def getMetadata(request):
     # get key: filename {id}
 	key_str = request.matchdict['id']
 	# get object
-	key = db.get(request.matchdict['id'])
-	db_data = key.data
+	db_key = db.get(key_str)
+	db_data = db_key.data
 	
 	# validate key exists in the db:
-	if not key.exists:
+	if not db_key.exists:
 		obj = ['result', {'msg': 'resource id: ' + key_str + ' was not found'}]	
 		res = Response(status=404, json=obj)
 	else:
-	    # only return the metadata portion of the object
-		obj = {'metadata': db_data['metadata']}
-		res = Response(status=200, json=obj)
+	    # only return the metadata portion of the object: file_location = [0], metadata = [1]
+		res = Response(status=200, json=db_data[1])
 		
 	return res
 	
@@ -139,16 +176,19 @@ def setMetadata(request):
 
 	# get key: filename {id}
 	key_str = request.matchdict['id']
-	key = db.get(request.matchdict['id'])
+	db_key = db.get(key_str)
 	
 	# validate key exists in the db:
-	if not key.exists:
+	if not db_key.exists:
 		obj = ['result', {'msg': 'resource id: ' + key_str + ' was not found'}]	
 		res = Response(status=404, json=obj)
 	else:
+		db_data = db_key.data
+		db_mdata = db_data[1]
+		
 		# get the data from the request JSON object, validating in the process:
 		try:
-			author = request.json['metadata']['author']
+			author = request.json['metadata']['author']			
 			title = request.json['metadata']['title']
 			description = request.json['metadata']['description']
 			keywords = request.json['metadata']['keywords']
@@ -161,23 +201,151 @@ def setMetadata(request):
 
 		# get the current time of the operation for updating the 'last_modified_date' field
 		now = strftime("%Y-%m-%d %H:%M:%S")
-		
+
 		# load up the data object
-		key.data['metadata']['author'] = author
-		key.data['metadata']['title'] = title
-		key.data['metadata']['description'] = description
-		key.data['metadata']['keywords'] = keywords
-		key.data['metadata']['last_modified_date'] = now
-		key.data['metadata']['mime_type'] = mime_type
-		key.data['metadata']['version'] = version
-		key.store()
+		db_mdata['metadata']['author'] = author
+		db_mdata['metadata']['title'] = title
+		db_mdata['metadata']['description'] = description
+		db_mdata['metadata']['keywords'] = keywords
+		db_mdata['metadata']['last_modified_date'] = now
+		db_mdata['metadata']['mime_type'] = mime_type
+		db_mdata['metadata']['version'] = version
+		db_key.data[1] = db_mdata
+		db_key.store()
 		
 		# return the metadata that was just set
-		obj = {'metadata': key.data['metadata']}
-		res = Response(status=200, json=obj)
+		#obj = {'metadata': key.data['metadata']}
+		res = Response(status=200, json=db_key.data[1])
 		return res
 
+''' this method takes a GET request with key {id} and returns the paradata object for that file.
+    Returns:
+    200: OK: the paradata was successfully returned.
+    404: Not Found: the file was not in the db. '''
+def getParadata(request):
+    # get key: filename {id}
+	key_str = request.matchdict['id']
+	# get object
+	db_key = db.get(key_str)
+	db_data = db_key.data
+	
+	# validate key exists in the db:
+	if not db_key.exists:
+		obj = ['result', {'msg': 'resource id: ' + key_str + ' was not found'}]	
+		res = Response(status=404, json=obj)
+	else:
+	    # only return the paraadata portion of the object: file_location = [0], metadata = [1], paradata = [2]
+		res = Response(status=200, json=db_data[2])
+		
+	return res
 
+		
+''' this method takes a POST request with key {id} and a JSON document with the user review paradata
+    to set and returns the paradata part of the object's JSON data for that file.
+
+    Returns:
+    200: OK: the user review paradata was successfully set and returned.
+    404: Not Found: the file was not in the db. '''
+def setUserReviewParadata(request):
+    # variables for user reviews:
+	review_id = ''
+	user_rating = ''
+	user_name = ''
+	user_review_title = ''
+	user_review = ''
+	timestamp = ''
+
+	# get key: filename {id}
+	key_str = request.matchdict['id']
+	db_key = db.get(key_str)
+	# get the current time of the operation for updating the 'timestamp' field
+	now = strftime("%Y-%m-%d %H:%M:%S")
+	
+	# validate key exists in the db:
+	if not db_key.exists:
+		obj = ['result', {'msg': 'resource id: ' + key_str + ' was not found'}]	
+		res = Response(status=404, json=obj)
+	else:
+		db_data = db_key.data
+		db_pdata = db_data[2]
+		
+		# get the data from the request JSON object, validating in the process:
+		try:
+			review_id = str(uuid.uuid4())
+			user_rating = request.json['user_reviews']['user_rating']
+			user_name = request.json['user_reviews']['user_name']
+			user_review_title = request.json['user_reviews']['user_review_title']
+			user_review = request.json['user_reviews']['user_review']
+			timestamp = now
+		except ValueError:
+			return Response(status=400, body='Body is not in JSON format')
+		except KeyError, ke:
+			return Response(status=400, body='Body does not include required field: ' + str(ke) )
+
+		# add the new user review paradata object
+		db_pdata['paradata']['user_reviews'].append({'review_id': review_id, 'user_rating': user_rating, 'user_name': user_name, 'user_review_title': user_review_title, 'user_review': user_review, 'timestamp': timestamp})
+		db_key.data[2] = db_pdata
+		db_key.store()
+		
+		# return the paradata that was just set
+		res = Response(status=200, json=db_key.data[2])
+		return res
+		
+''' this method takes a POST request with key {fid}, review id {rid} and a JSON document with the 
+    user comment paradata to set and returns the paradata part of the object's JSON data for that file.
+
+    Returns:
+    200: OK: the user comment paradata was successfully set and returned.
+    404: Not Found: the file was not in the db. '''
+def setUserCommentParadata(request):
+    # variables for user comments:
+	review_id = ''
+	comment_id = ''
+	helpful = ''
+	user_name = ''
+	user_comment = ''
+	timestamp = ''
+
+	# get key: filename {fid}
+	key_str = request.matchdict['fid']
+	db_key = db.get(key_str)
+	
+	# get review_id: {rid}
+	review_id = request.matchdict['rid']
+	
+	# get the current time of the operation for updating the 'timestamp' field
+	now = strftime("%Y-%m-%d %H:%M:%S")
+	
+	# validate key exists in the db:
+	if not db_key.exists:
+		obj = ['result', {'msg': 'resource id: ' + key_str + ' was not found'}]	
+		res = Response(status=404, json=obj)
+	else:
+		db_data = db_key.data
+		db_pdata = db_data[2]
+		
+		# get the data from the request JSON object, validating in the process:
+		try:
+			comment_id = str(uuid.uuid4())
+			helpful = request.json['user_comments']['helpful']
+			user_name = request.json['user_comments']['user_name']
+			user_comment = request.json['user_comments']['user_comment']
+			timestamp = now
+		except ValueError:
+			return Response(status=400, body='Body is not in JSON format')
+		except KeyError, ke:
+			return Response(status=400, body='Body does not include required field: ' + str(ke) )
+
+		# add the new user comment paradata object
+		db_pdata['paradata']['user_comments'].append({'review_id': review_id, 'comment_id': comment_id, 'helpful': helpful, 'user_name': user_name, 'user_comment': user_comment, 'timestamp': timestamp})
+		db_key.data[2] = db_pdata
+		db_key.store()
+		
+		# return the paradata that was just set
+		res = Response(status=200, json=db_key.data[2])
+		return res
+
+		
 ''' This method currently takes a POST request from a web form template to upload one or more files.
     Each file is checked against the allowed file extensions for acceptance. Files are uploaded and 
 	stored on the server with a filepath saved to the 'file_location' part of the data object.
@@ -221,24 +389,19 @@ def uploadFile(request):
 			if db.get(uid).exists:
 				failedlist.append('<li>[400] ' + uid + '</li>\n')
 				#variables = {'f': '[409] The file already exists in the database!'}
-				#return render_to_response('public/upload_response.pt', variables, request=request)
+				#return render_to_response('templates/upload_response.pt', variables, request=request)
 			else:
 				now = strftime("%Y-%m-%d %H:%M:%S")
-				data = copy.deepcopy(dataProfile)
-				data['file_location']['local_path'] = upload_path
-				data['metadata']['upload_date'] = now
-				data['metadata']['last_modified_date'] = now
-				data['metadata']['resource_type'] = extension.lower()
+				key = db.new(uid, [{'file_location': {'local_path': upload_path}}, {'metadata':{'author':'', 'title':'', 'description':'', 'upload_date': now, 'last_modified_date': now, 'mime_type':'', 'resource_type': extension.lower(), 'keywords':'', 'version': ''}}, {'paradata': {'user_reviews': [], 'user_comments': []} }])
 				
-				key = db.new(uid, data=data)
 				key.store()
 				successlist.append('<li>[200] ' + uid + '</li>\n')
 				#variables = {'f': '[200] The file ' + filename + ' was successfully saved to the database!'}
-				#return render_to_response('public/upload_response.pt', variables, request=request)
+				#return render_to_response('templates/upload_response.pt', variables, request=request)
 		else:
 			failedlist.append('<li>[400] ' + filename + '</li>\n')
 			#variables = {'f': '[404] The file extension is not compatible for upload!'}
-			#return render_to_response('public/upload_response.pt', variables, request=request)
+			#return render_to_response('templates/upload_response.pt', variables, request=request)
 
 	for NI in successlist:
 		success_HTML = success_HTML + NI
@@ -246,7 +409,7 @@ def uploadFile(request):
 		failed_HTML = failed_HTML + NI
 
 	variables = {'success': success_HTML, 'failed': failed_HTML}
-	return render_to_response('public/upload_response.pt', variables, request=request)
+	return render_to_response('templates/upload_response.pt', variables, request=request)
 
 ''' This method currently takes a GET request to download one file {id}. Files are retrieved using the filepath 
     from the data object.
@@ -257,14 +420,18 @@ def uploadFile(request):
 def downloadFile(request):
 	# get key: filename {id}
 	filename = request.matchdict['id']
-	key = db.get(request.matchdict['id'])
+	db_key = db.get(filename)
+	db_data = db_key.data
+
 	# validate key exists in the db:
-	if not key.exists:
+	if not db_key.exists:
 		obj = ['result', {'msg': 'resource id: ' + filename + ' was not found'}]	
 		res = Response(status=404, json=obj)
 	else:
 		# get file location for download
-		file_path = key.data['file_location']['local_path']
+		db_fdata = db_data[0]
+		file_path = db_fdata['file_location']['local_path']
+		
 		# call download routines
 		res = Response(content_type=get_mimetype(file_path))
 		res.app_iter = FileIterable(file_path)
@@ -280,17 +447,19 @@ def downloadFile(request):
 def deleteFile(request):
 	# get key: filename {id}
 	key_str = request.matchdict['id']
-	key = db.get(request.matchdict['id'])
-	db_data = key.data
+	db_key = db.get(key_str)
+	db_data = db_key.data
+
 	# validate key exists in the db:
-	if not key.exists:
+	if not db_key.exists:
 		obj = ['result', {'msg': 'resource id: ' + key_str + ' was not found'}]	
 		res = Response(status=404, json=obj)
 	else:
 		# get file location for delete
-		file_path = db_data['file_location']['local_path']
+		db_fdata = db_data[0]
+		file_path = db_fdata['file_location']['local_path']
 		# delete from db
-		key.delete()
+		db_key.delete()
 		# delete from file system
 		os.remove(file_path)
 		obj = ['result', {'msg': 'deleteFile request for resource id: ' + key_str + ' was successful'}]	
@@ -298,7 +467,25 @@ def deleteFile(request):
 		
 	return res
 
+''' This method takes a GET request to delete ALL files in the db.
+	
+	Returns:
+	200: OK: Returns a JSON document with a message that all files were deleted.'''
+def deleteAll(request):
+	
+	for next_key in db.get_keys():
+		db_key = db.get(next_key)
+		db_data = db_key.data
+		db_fdata = db_data[0]
 
+		file_path = db_fdata['file_location']['local_path']
+		db_key.delete()
+		os.remove(file_path)
+		
+	obj = ['result', {'msg': 'All files deleted.'}]	
+	res = Response(status=200, json=obj)
+	return res
+	
 ''' This method takes a GET request to return a list of versions associated with one file {id}.
 	(it is currently stubbed out for testing responses).
 	
