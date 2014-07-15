@@ -75,15 +75,21 @@ def getKeys(request):
 	variables = {'success': success_HTML}
 	return render_to_response('templates/bucket_keys.pt', variables, request=request)
 	
-''' method for conducting a basic search. User submits a POST request consisting of a JSON document with a search term.
+''' method for conducting a basic search. User submits a POST request consisting of a JSON document with a search 
+    group: (metadata/paradata), field and term.
 	Returns:
-	200: OK: returns a list of filenames where there is a match between the search term and the metadata.
+	200: OK: returns a list of filenames (keys) where there is a match between the search term and the metadata.
 	400: Bad Request: The request body is not valid JSON, or does not contain the required field.
 	404: Not Found: No results returned. '''
 def basicSearch(request):
+	search_group = ''
+	search_field = ''
 	search_term = ''
+	keys_found = {'results': []}
 	
 	try:
+		search_group = request.json['search']['group']
+		search_field = request.json['search']['field']
 		search_term = request.json['search']['term']
 	except ValueError:
 		return Response(status=400, body='Body is not in JSON format')
@@ -91,50 +97,104 @@ def basicSearch(request):
 		return Response(status=400, body='Body does not include required field "search.term"')
 	
 	try:
-		term = 'metadata.keywords:*' + search_term.encode("utf-8") + '*'
-		search_results = client.search(db, term)
+		term = search_group.encode("utf-8") + '_' + search_field.encode("utf-8") + ':' + search_term.encode("utf-8")
+		print 'search query: ' + term
+		search_query = client.search('resources', term)
 	
 		try:
-			pprint.pprint(search_results['docs'])
-			'''
-			for result in search_results.run():
-				key = result.get()
-				data = key.get_data()
-				print incr
-				incr = incr + 1 '''
+			#print 'result entries found: ' + str(len(search_results))
+			for result in search_query.run():
+				result_key = result[1]
+				print result[0]
+				print result[1]
+				print result[2]
+				keys_found['results'].append({'key': result_key})
+
 		except Exception, e:
 			return Response(status=400, body='Problem with iterating search result: '  + str(e))
 	
 	except TypeError, te:
 		return Response(status=400, body='Problem with search request: '  + str(te))
 		
-	res = Response(status=200, body='search request success')
+	res = Response(status=200, json=keys_found)
 	return res
 
-''' method for conducting an advanced search. User submits a POST request consisting of a JSON document with three 
-        required search terms.
+''' method for conducting an advanced search. User submits a POST request consisting of a JSON document with up to   
+    at least two and at most three search groups: (metadata/paradata), field and term.
 	Returns:
-	200: OK: returns a list of filenames where there is a match between the search term and the metadata.
+	200: OK: returns a list of filenames (keys) where there is a match between the search term and the metadata.
 	400: Bad Request: The request body is not valid JSON, or does not contain the required field.
 	404: Not Found: No results returned. '''
 def advancedSearch(request):
 	# variables
-	author = ''
-	keywords = ''
-	resource_type = ''
+	term1 = ''
+	term2 = ''
+	term3 = ''
+	query = ''
+	search_group1 = ''
+	search_group2 = ''
+	search_group3 = ''
+	search_field1 = ''
+	search_field2 = ''
+	search_field3 = ''
+	search_term1 = ''
+	search_term2 = ''
+	search_term3 = ''
+	keys_found = {'results': []}
 	
-	# check incoming request for validity as well as assigning values
+	# check incoming request for validity as well as the required two sets of groups/fields/terms 
+	# for the advanced query
 	try:
-		author = request.json['advanced_search']['author']
-		keywords = request.json['advanced_search']['keywords']
-		resource_type = request.json['advanced_search']['resource_type']
+		# require at least two for advanced search: group/field/term  AND group/field/term
+		search_group1 = request.json['advanced_search']['group1']
+		search_group2 = request.json['advanced_search']['group2']
+		search_group3 = request.json['advanced_search']['group3']
+		search_field1 = request.json['advanced_search']['field1']
+		search_field2 = request.json['advanced_search']['field2']
+		search_field3 = request.json['advanced_search']['field3']
+		search_term1 = request.json['advanced_search']['term1']
+		search_term2 = request.json['advanced_search']['term2']
+		search_term3 = request.json['advanced_search']['term3']
 	except ValueError:
-		return Response(status=400, body='Body is not in JSON format')
+		return Response(status=400, body='Advanced search body is not in JSON format')
 	except KeyError, ke:
-		return Response(status=400, body='Body does not include required field: ' + str(ke) )
+		return Response(status=400, body='Advanced search body does not include required fields: ' + str(ke) )
+
+	if search_group1 != '':
+		term1 = search_group1.encode("utf-8") + '_' + search_field1.encode("utf-8") + ':' + search_term1.encode("utf-8")
+		
+	if search_group2 != '':
+		term2 = search_group2.encode("utf-8") + '_' + search_field2.encode("utf-8") + ':' + search_term2.encode("utf-8")
+
+	if search_group3 != '':
+		term3 = search_group3.encode("utf-8") + '_' + search_field3.encode("utf-8") + ':' + search_term3.encode("utf-8")
+		
+	try:
+		if term1 != '' and term2 != '' and term3 != '':
+			query = term1 + ' AND ' + term2 + ' AND ' + term3		
+		elif term1 != '' and term2 != '':
+			query = term1 + ' AND ' + term2
+		elif term1 != '':
+			query = term1
+		else:
+			return Response(status=400, body='Advanced search terms are empty')
+			
+		print 'advanced search query: ' + query
+		search_query = client.search('resources', query)
 	
-	obj = ['result', {'msg': 'You made an advanced search request for author: ' + author + ', keywords: ' + keywords + ', resource_type: ' + resource_type}]
-	res = Response(status=200, json=obj)
+		try:
+			#print 'result entries found: ' + str(len(search_results))
+			for result in search_query.run():
+				result_key = result[1]
+				keys_found['results'].append({'key': result_key})
+
+		except Exception, e:
+			return Response(status=400, body='Problem with iterating advanced search result: '  + str(e))
+	
+	except TypeError, te:
+		return Response(status=400, body='Problem with advanced search request: '  + str(te))
+		
+	res = Response(status=200, json=keys_found)
 	return res
 
 
@@ -392,7 +452,7 @@ def uploadFile(request):
 				#return render_to_response('templates/upload_response.pt', variables, request=request)
 			else:
 				now = strftime("%Y-%m-%d %H:%M:%S")
-				key = db.new(uid, [{'file_location': {'local_path': upload_path}}, {'metadata':{'author':'', 'title':'', 'description':'', 'upload_date': now, 'last_modified_date': now, 'mime_type':'', 'resource_type': extension.lower(), 'keywords':'', 'version': ''}}, {'paradata': {'user_reviews': [], 'user_comments': []} }])
+				key = db.new(uid, [{'file_location': {'local_path': upload_path}}, {'metadata':{'author':'', 'title':'', 'description':'', 'upload_date': now, 'last_modified_date': now, 'mime_type':'', 'resource_type': extension.lower(), 'keywords':'', 'version': ''}}, {'paradata': {'user_reviews': [], 'user_comments': []} }], content_type='application/json', encoded_data=None)
 				
 				key.store()
 				successlist.append('<li>[200] ' + uid + '</li>\n')
